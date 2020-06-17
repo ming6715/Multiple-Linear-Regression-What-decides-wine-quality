@@ -1,0 +1,288 @@
+---
+title: "What Decides Wine Quality"
+author: "Allen Martinez, Mingjun Li, Yifei Zhou"
+date: "9/23/2019"
+output:
+  slidy_presentation: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r echo=FALSE}
+wine <- read.csv('winedata.csv',stringsAsFactors = F)
+attach(wine)
+```
+# Introduction
+Background:
+
+Purpose: 
+
+- relationship between wine quality and a series of chemical composition indexes of wine
+- give some advice on how to improve the wine procedure
+
+
+# Data Overview
+- detect missing value
+```{r echo=FALSE}
+table(is.na(wine))
+```
+- data structure
+```{r wine, echo = TRUE}
+str(wine)
+```
+
+
+# Variables Explaination
+
+
+# Data distribution (1)
+```{r echo=FALSE}
+library(ggplot2)
+par(mfrow=c(2,3))
+hist(quality_score)
+for (i in 2:6){
+  boxplot(wine[,i]~type,ylab=names(wine)[i],xlab='',names=c('white','red'))
+}
+```
+
+
+# Data distribution (2)
+```{r echo=FALSE}
+par(mfrow=c(2,3))
+for (i in 7:12){
+  boxplot(wine[,i]~type,ylab=names(wine)[i],xlab='',names=c('white','red'))
+}
+```
+
+
+# Relationship with Quality Score (1)
+```{r echo=FALSE}
+library(ggplot2)
+hist(type,breaks=2,xlab='Type of Wines (0 for white wine and 1 for red wine)')
+for (i in 2:6){
+  plot = ggplot(wine,aes(x=wine[,i],y=quality_score,col=factor(type)))+
+        geom_point() +
+        scale_color_manual('0 for white, 1 for red',values=c('skyblue','red3'))+
+        labs(x=names(wine)[i])
+  print(plot)
+}
+```
+
+
+# Relationship with Quality Score (2)
+```{r echo=FALSE}
+library(ggplot2)
+for (i in 7:12){
+  plot = ggplot(wine,aes(x=wine[,i],y=quality_score,col=factor(type)))+
+        geom_point() +
+        scale_color_manual('0 for white, 1 for red',values=c('skyblue','red3'))+
+        labs(x=names(wine)[i])
+  print(plot)
+}
+
+```
+
+
+# Regression Procedures 
+
+
+
+# Fit Mulitple Linear Regression Model With All Variables
+```{r echo=FALSE}
+m1 <- lm(quality_score ~ type+fixed.acidity+volatile.acidity+citric.acid+residual.sugar+
+           chlorides+free.sulfur.dioxide+total.sulfur.dioxide+wine$density+pH+sulphates+alcohol)
+summary(m1)
+```
+
+# Diagnostic Plots
+```{r echo=FALSE}
+par(mfrow=c(2,2))
+plot(m1)
+```
+
+# Challenges
+- Unconstant Variance --> Box Cox
+
+- Multicollinearity --> Delete Variables
+
+- Influential Plot(tend to overestimate) --> Reweight
+
+
+# Box Cox
+>best lamba = 0.7475
+
+```{r echo=FALSE,results='hide'}
+library(MASS)
+bc <- boxcox(m1)
+lambda <- bc$x 
+likelihood <- bc$y 
+bestlambda <- lambda[which(likelihood==max(likelihood))]
+quality_score.t = quality_score**(bestlambda)
+```
+```{r echo=FALSE}
+m2 <- lm(quality_score.t ~ type+fixed.acidity+volatile.acidity+citric.acid+residual.sugar+
+          chlorides+free.sulfur.dioxide+total.sulfur.dioxide+density+pH+sulphates+alcohol)
+par(mfrow=c(2,2))
+plot(m2)
+```
+
+# After Transformation
+> Current model has serious Multicollinearity
+
+```{r echo=FALSE}
+library(car)
+```
+```{r echo=FALSE}
+vif(m2)
+```
+
+> Delete the density
+
+```{r echo=FALSE}
+m4 <- lm(quality_score.t ~ type+fixed.acidity+volatile.acidity+citric.acid+residual.sugar+
+          chlorides+free.sulfur.dioxide+total.sulfur.dioxide+pH+sulphates+alcohol)
+vif(m4)
+```
+```{r echo=FALSE,results='hide'}
+summary(m4)
+```
+
+# Variable Selection
+# Type 3 Extra SSE
+> fixed.acidity, citric.acid and pH do not significantly help to explain the data.
+
+```{r echo=FALSE}
+library(car)
+Anova(m4,type=3)
+```
+
+# Best Subset
+```{r echo=FALSE}
+library(leaps)
+bestsubsets <- regsubsets(
+          quality_score.t ~ type+fixed.acidity+volatile.acidity+citric.acid+residual.sugar+
+          chlorides+free.sulfur.dioxide+total.sulfur.dioxide+pH+sulphates+alcohol,
+          data=wine,nbest=1,nvmax = 11)
+s <- summary(bestsubsets)
+cbind(s$which,r2=s$rsq,adjr2=s$adjr2,cp=s$cp,bic=s$bic)
+```
+
+
+# Stepwise
+> forward result: 9 vars
+
+```{r echo=FALSE,results='hide'}
+null <- lm(quality_score.t~1)
+full <- m4
+forward <- step(null,scope=list(lower=null,upper=full),direction = 'both')
+```
+```{r echo=FALSE}
+summary(forward)
+```
+# Stepwise
+> backward result: same as forward, R_adj is small
+
+```{r echo=FALSE,results='hide'}
+backward <- step(full,direction='both')
+```
+```{r echo=FALSE}
+summary(backward)
+```
+
+
+# Detecing Influential Points
+```{r echo=FALSE}
+library(car)
+best <- lm(quality_score.t ~ type + volatile.acidity + citric.acid + 
+    residual.sugar + chlorides + free.sulfur.dioxide + total.sulfur.dioxide + 
+    sulphates + alcohol)
+summary(best)
+
+```
+```{r}
+par(mfrow=c(2,2))
+plot(best)
+```
+```{r echo=FALSE}
+fitted <- best$fitted
+leverage = hatvalues(best)
+
+par(mfrow=c(2,2))
+# High leverage points
+threshold = 2*length(best$coefficients)/length(quality_score)
+plot(fitted,leverage,main='Plot of Leverage',type='n')
+text(fitted,leverage,labels=round(quality_score,0))
+abline(h=threshold)
+
+# Influential Plot
+influencePlot(best,main='Influence Plot')
+cook <- cooks.distance(best)
+# Cook distance Plot
+plot(fitted,cook,main='Plot of Cook Distance',type='n')
+text(fitted,cook,labels=round(quality_score,0))
+```
+```{r echo=FALSE,results='hide'}
+# DFITS
+Infval <- dffits(best)
+subset(Infval, Infval > 2*sqrt(length(best$coefficients)/length(quality_score)))
+```
+
+# Influential Data Points
+```{r echo=FALSE,result='asis'}
+# show the influential points
+wine[c(1206, 1908, 4720, 5129, 5022),c("type","quality_score")]
+```
+
+# Reweight Regression Model
+```{r echo=FALSE}
+library(MASS)
+rlm <- rlm( quality_score.t ~ type + volatile.acidity + citric.acid + 
+    residual.sugar + chlorides + free.sulfur.dioxide + total.sulfur.dioxide + 
+    sulphates + alcohol
+    )
+s = summary(rlm)
+s
+rlm.d=data.frame(s$coefficients)
+rlm.d$p.value =  2*pt(abs(rlm.d$t.value), s$df[2], lower.tail=FALSE) 
+rlm.d
+```
+```{r echo=FALSE}
+n=length(quality_score)
+intercept = rep(1,n)
+J=intercept%*%t(intercept) # get matrix of ones
+I=diag(n)
+X= cbind(intercept,type , volatile.acidity , citric.acid , residual.sugar , chlorides , free.sulfur.dioxide , total.sulfur.dioxide , sulphates , alcohol)
+Y=quality_score.t
+H= X%*%solve(t(X)%*%X)%*%t(X)
+SSR=t(Y)%*%(H-J/n)%*%Y
+SSTO=t(Y)%*%(I-J/n)%*%Y
+SSE=SSTO-SSR
+R_square=SSR/SSTO
+R_adj=1-(SSE/(n-10))/(SSTO/(n-1))
+c(R_square,R_adj)
+```
+
+# Diagnostic Plots of Reweight Regression Model
+```{r echo=FALSE}
+par(mfrow=c(2,2))
+plot(rlm)
+```
+
+# Bootstrap
+```{r warning=FALSE}
+library(car)
+set.seed(1000)
+rlm.boot <- Boot(rlm, R=999)
+summary(rlm.boot)
+confint(rlm.boot,type = 'perc')
+confint(best,level=0.95)
+```
+
+# Histgrams
+```{r echo=FALSE}
+#hist(rlm.boot,legend='separate')
+```
+
+# Result and Summary
